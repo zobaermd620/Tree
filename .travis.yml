@@ -1,0 +1,59 @@
+os: linux
+dist: bionic 
+language: generic 
+sudo: required 
+git: 
+  depth: 1 
+addons: 
+  apt: 
+    update: 
+      - true 
+services: 
+  - docker 
+before_install: 
+  - docker pull fr3akyphantom/droid-builder:latest 
+before_script: 
+  - cd $HOME && mkdir twrp 
+  # Download latest TWRP minimal sources (Android 12.1) 
+  - TWRP_SOURCE="https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git" 
+  - git clone --depth=1 -b twrp-12.1 $TWRP_SOURCE $HOME/twrp 
+  # Initialize repo 
+  - cd $HOME/twrp 
+  - repo init -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_aosp.git -b twrp-12.1 
+  - repo sync -j$(nproc --all) --force-sync --no-clone-bundle --no-tags 
+script: 
+  # Clone your device tree 
+  - mkdir -p device/xiaomi/lake 
+  - git clone https://github.com/zobaermd620/redmi14c-lake-twrp-device-tree.git device/xiaomi/lake 
+  # Build TWRP 
+  - | 
+    docker run --rm -i -e USER_ID=$(id -u) -e GROUP_ID=$(id -g) \ 
+    -v "$(pwd):/home/builder/twrp/:rw,z" \ 
+    -v "${HOME}/.ccache:/srv/ccache:rw,z" \ 
+    fr3akyphantom/droid-builder bash << EOF 
+    cd /home/builder/twrp/ 
+    source build/envsetup.sh 
+    BUILD_FLAVOR="eng" 
+    lunch twrp_lake-${BUILD_FLAVOR} 
+    mka recoveryimage 
+    exit 
+    EOF 
+after_success: 
+  - export version=$(grep "TW_MAIN_VERSION_STR" bootable/recovery/variables.h | cut -d '"' -f2) 
+  - cp out/target/product/lake/recovery.img TWRP-$version-lake-$(date +"%Y%m%d")-Unofficial.img 
+deploy: 
+  skip_cleanup: true 
+  provider: releases 
+  api_key: $GitOAUTHToken 
+  file_glob: true 
+  file: TWRP-*.img 
+  on: 
+    tags: false 
+    repo: zobaermd620/redmi14c-lake-twrp-device-tree 
+    branch: master 
+branches: 
+  only: 
+    - master 
+  except: 
+    - /^(?i:untagged)-.*$/ 
+    - /^v\d+\.\d+(\.\d+)?(-\S*)?$/ 
